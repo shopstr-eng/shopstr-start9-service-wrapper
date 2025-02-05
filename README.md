@@ -58,7 +58,7 @@ git clone https://github.com/Start9Labs/start-os.git && \
  cd start-os && git submodule update --init --recursive && \
  make sdk
 ```
-If the build is failing, downgrade your Rust version then build again
+- If the build is failing, downgrade your Rust version then build again
 ```
 rustup toolchain install 1.79.0
 rustup override set 1.79.0
