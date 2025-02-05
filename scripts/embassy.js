@@ -3757,6 +3757,156 @@ function fromMapping(migrations, currentVersion) {
         };
     };
 }
+const isType = mod.shape({
+    type: mod.string
+});
+const recordString = mod.dictionary([
+    mod.string,
+    mod.unknown
+]);
+const matchDefault = mod.shape({
+    default: mod.unknown
+});
+const matchNullable = mod.shape({
+    nullable: mod.literal(true)
+});
+const matchPattern = mod.shape({
+    pattern: mod.string
+});
+const rangeRegex = /(\[|\()(\*|(\d|\.)+),(\*|(\d|\.)+)(\]|\))/;
+const matchRange = mod.shape({
+    range: mod.regex(rangeRegex)
+});
+const matchIntegral = mod.shape({
+    integral: mod.literal(true)
+});
+const matchSpec = mod.shape({
+    spec: recordString
+});
+const matchSubType = mod.shape({
+    subtype: mod.string
+});
+const matchUnion = mod.shape({
+    tag: mod.shape({
+        id: mod.string
+    }),
+    variants: recordString
+});
+const matchValues = mod.shape({
+    values: mod.arrayOf(mod.string)
+});
+function charRange(value = "") {
+    const split = value.split("-").filter(Boolean).map((x)=>x.charCodeAt(0));
+    if (split.length < 1) return null;
+    if (split.length === 1) return [
+        split[0],
+        split[0]
+    ];
+    return [
+        split[0],
+        split[1]
+    ];
+}
+function generateDefault(generate, { random = ()=>Math.random() } = {}) {
+    const validCharSets = generate.charset.split(",").map(charRange).filter(Array.isArray);
+    if (validCharSets.length === 0) throw new Error("Expecing that we have a valid charset");
+    const max = validCharSets.reduce((acc, x)=>x.reduce((x, y)=>Math.max(x, y), acc), 0);
+    let i = 0;
+    const answer = Array(generate.len);
+    while(i < generate.len){
+        const nextValue = Math.round(random() * max);
+        const inRange = validCharSets.reduce((acc, [lower, upper])=>acc || nextValue >= lower && nextValue <= upper, false);
+        if (!inRange) continue;
+        answer[i] = String.fromCharCode(nextValue);
+        i++;
+    }
+    return answer.join("");
+}
+function withPattern(value) {
+    if (matchPattern.test(value)) return mod.regex(RegExp(value.pattern));
+    return mod.string;
+}
+function matchNumberWithRange(range) {
+    const matched = rangeRegex.exec(range);
+    if (!matched) return mod.number;
+    const [, left, leftValue, , rightValue, , right] = matched;
+    return mod.number.validate(leftValue === "*" ? (_)=>true : left === "[" ? (x)=>x >= Number(leftValue) : (x)=>x > Number(leftValue), leftValue === "*" ? "any" : left === "[" ? `greaterThanOrEqualTo${leftValue}` : `greaterThan${leftValue}`).validate(rightValue === "*" ? (_)=>true : right === "]" ? (x)=>x <= Number(rightValue) : (x)=>x < Number(rightValue), rightValue === "*" ? "any" : right === "]" ? `lessThanOrEqualTo${rightValue}` : `lessThan${rightValue}`);
+}
+function withIntegral(parser, value) {
+    if (matchIntegral.test(value)) {
+        return parser.validate(Number.isInteger, "isIntegral");
+    }
+    return parser;
+}
+function withRange(value) {
+    if (matchRange.test(value)) {
+        return matchNumberWithRange(value.range);
+    }
+    return mod.number;
+}
+const isGenerator = mod.shape({
+    charset: mod.string,
+    len: mod.number
+}).test;
+function defaultNullable(parser, value) {
+    if (matchDefault.test(value)) {
+        if (isGenerator(value.default)) return parser.defaultTo(parser.unsafeCast(generateDefault(value.default)));
+        return parser.defaultTo(value.default);
+    }
+    if (matchNullable.test(value)) return parser.optional();
+    return parser;
+}
+function guardAll(value) {
+    if (!isType.test(value)) {
+        return mod.unknown;
+    }
+    switch(value.type){
+        case "boolean":
+            return defaultNullable(mod.boolean, value);
+        case "string":
+            return defaultNullable(withPattern(value), value);
+        case "number":
+            return defaultNullable(withIntegral(withRange(value), value), value);
+        case "object":
+            if (matchSpec.test(value)) {
+                return defaultNullable(typeFromProps(value.spec), value);
+            }
+            return mod.unknown;
+        case "list":
+            {
+                const spec = matchSpec.test(value) && value.spec || {};
+                const rangeValidate = matchRange.test(value) && matchNumberWithRange(value.range).test || (()=>true);
+                const { default: _, ...arrayOfSpec } = spec;
+                const subtype = matchSubType.unsafeCast(value).subtype;
+                return defaultNullable(mod.arrayOf(guardAll({
+                    type: subtype,
+                    ...arrayOfSpec
+                })).validate((x)=>rangeValidate(x.length), "valid length"), value);
+            }
+        case "enum":
+            if (matchValues.test(value)) {
+                return defaultNullable(mod.literals(value.values[0], ...value.values), value);
+            }
+            return mod.unknown;
+        case "pointer":
+            return mod.unknown;
+        case "union":
+            if (matchUnion.test(value)) {
+                return mod.some(...Object.entries(value.variants).map(([variant, spec])=>mod.shape({
+                        [value.tag.id]: mod.literal(variant)
+                    }).concat(typeFromProps(spec))));
+            }
+            return mod.unknown;
+    }
+    return mod.unknown;
+}
+function typeFromProps(valueDictionary) {
+    if (!recordString.test(valueDictionary)) return mod.unknown;
+    return mod.shape(Object.fromEntries(Object.entries(valueDictionary).map(([key, value])=>[
+            key,
+            guardAll(value)
+        ])));
+}
 function unwrapResultType(res) {
     if ("error-code" in res) {
         throw new Error(res["error-code"][1]);
@@ -3767,6 +3917,19 @@ function unwrapResultType(res) {
     }
 }
 const exists = (effects, props)=>effects.metadata(props).then((_)=>true, (_)=>false);
+const errorCode = (code, error)=>({
+        "error-code": [
+            code,
+            error
+        ]
+    });
+const error = (error)=>({
+        error
+    });
+const ok = {
+    result: null
+};
+const isKnownError = (e)=>e instanceof Object && ("error" in e || "error-code" in e);
 const asResult = (result)=>({
         result: result
     });
@@ -3835,13 +3998,31 @@ const getConfig = (spec)=>async (effects)=>{
             }
         };
     };
+const getConfigAndMatcher = (spec)=>[
+        async (effects)=>{
+            const config = await effects.readFile({
+                path: "start9/config.yaml",
+                volumeId: "main"
+            }).then((x)=>mod1.parse(x)).then((x)=>matchConfig.unsafeCast(x)).catch((e)=>{
+                effects.info(`Got error ${e} while trying to read the config`);
+                return undefined;
+            });
+            return {
+                result: {
+                    config,
+                    spec
+                }
+            };
+        },
+        typeFromProps(spec)
+    ];
 function updateConfig(fn, configured, noRepeat, noFail = false) {
     return migrationFn(async (effects)=>{
         await noRepeatGuard(effects, noRepeat, async ()=>{
             let config = unwrapResultType(await getConfig({})(effects)).config;
             if (config) {
                 try {
-                    config = fn(config, effects);
+                    config = await fn(config, effects);
                 } catch (e) {
                     if (!noFail) {
                         throw e;
@@ -3928,13 +4109,56 @@ const mod3 = {
     properties: properties,
     setConfig: setConfig,
     getConfig: getConfig,
+    getConfigAndMatcher: getConfigAndMatcher,
     migrations: mod2
+};
+const checkWebUrl = (url)=>{
+    return async (effects, duration)=>{
+        let errorValue;
+        if (errorValue = guardDurationAboveMinimum({
+            duration,
+            minimumTime: 5000
+        })) return errorValue;
+        return await effects.fetch(url).then((_)=>ok).catch((e)=>{
+            effects.warn(`Error while fetching URL: ${url}`);
+            effects.error(JSON.stringify(e));
+            effects.error(e.toString());
+            return error(`Error while fetching URL: ${url}`);
+        });
+    };
+};
+const runHealthScript = ({ command, args })=>async (effects, _duration)=>{
+        const res = await effects.runCommand({
+            command,
+            args
+        });
+        if ("result" in res) {
+            return {
+                result: null
+            };
+        } else {
+            return res;
+        }
+    };
+const guardDurationAboveMinimum = (input)=>input.duration <= input.minimumTime ? errorCode(60, "Starting") : null;
+const catchError = (effects)=>(e)=>{
+        if (isKnownError(e)) return e;
+        effects.error(`Health check failed: ${e}`);
+        return error("Error while running health check");
+    };
+const mod4 = {
+    checkWebUrl: checkWebUrl,
+    runHealthScript: runHealthScript,
+    guardDurationAboveMinimum: guardDurationAboveMinimum,
+    catchError: catchError
 };
 const setConfig1 = mod3.setConfig;
 const getConfig1 = mod3.getConfig({});
-const properties1 = mod3.properties;
-const migration = mod3.migrations.fromMapping({}, "1.0.0.0");
+const migration = mod3.migrations.fromMapping({}, "0.1.0");
+const health = {
+    "web-ui": mod4.checkWebUrl("http://shopstr.embassy:3000")
+};
 export { setConfig1 as setConfig };
 export { getConfig1 as getConfig };
-export { properties1 as properties };
 export { migration as migration };
+export { health as health };
