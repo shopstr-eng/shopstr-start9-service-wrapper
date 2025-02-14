@@ -1,4 +1,4 @@
-FROM calvadev/shopstr-eng:v0.1.0
+FROM calvadev/shopstr:latest
 
 RUN apt update && \
     apt install -y curl && \
