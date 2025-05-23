@@ -1,13 +1,13 @@
 id: shopstr
 title: "Shopstr"
-version: 0.4.2
+version: 0.7.2
 release-notes: |
   This update of Shopstr brings the following improvements and fixes:
-    - Added Blossom media support for image uploads with metadata stripping
-    - Added a terms of service and privacy policy
-    - Added pagination for product viewing
-    - Fixed relay list duplication bug
-    - Removed excessive bottom margin on marketplace page
+    - Added loading indicators for image uploads and improved upload UX and validation
+    - Added support for out-of-band fiat payment methods
+    - Added improved onboarding flow
+    - Fixed styling for onboarding flow
+    - Fixed styling for 404 page
 license: GPL-3.0
 wrapper-repo: "https://github.com/shopstr-eng/shopstr-start9-service-wrapper"
 upstream-repo: "https://github.com/shopstr-eng/shopstr"
