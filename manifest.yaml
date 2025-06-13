@@ -1,13 +1,11 @@
 id: shopstr
 title: "Shopstr"
-version: 0.7.2
+version: 0.7.5
 release-notes: |
   This update of Shopstr brings the following improvements and fixes:
-    - Added loading indicators for image uploads and improved upload UX and validation
-    - Added support for out-of-band fiat payment methods
-    - Added improved onboarding flow
-    - Fixed styling for onboarding flow
-    - Fixed styling for 404 page
+    - Fixed race condition when minting new proofs at checkout
+    - Revised checkout page design
+    - Minor code styling fixes
 license: GPL-3.0
 wrapper-repo: "https://github.com/shopstr-eng/shopstr-start9-service-wrapper"
 upstream-repo: "https://github.com/shopstr-eng/shopstr"
